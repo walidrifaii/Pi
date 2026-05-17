@@ -1,6 +1,6 @@
 -- MySQL 8+ schema for shared hosting/phpMyAdmin users
 -- NOTE: This file does not create/select database.
--- Select your existing database in phpMyAdmin, then import this file.
+-- Select your existing database in phpMyAdmin, then import this file.///
 
 CREATE TABLE IF NOT EXISTS users (
   id CHAR(24) NOT NULL,
