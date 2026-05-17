@@ -9,9 +9,39 @@ CREATE TABLE IF NOT EXISTS users (
   password VARCHAR(255) NOT NULL,
   role ENUM('admin', 'user') NOT NULL DEFAULT 'user',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  message_balance INT NOT NULL DEFAULT 0,
+  auth_token TEXT NULL,
+  api_token TEXT NULL,
+  api_token_created_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_users_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS admins (
+  id INT NOT NULL AUTO_INCREMENT,
+  name VARCHAR(120) NOT NULL DEFAULT 'Admin',
+  email VARCHAR(255) NOT NULL,
+  password VARCHAR(255) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_admin_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS token_sessions (
+  id INT NOT NULL AUTO_INCREMENT,
+  token_hash CHAR(64) NOT NULL,
+  token TEXT NOT NULL,
+  owner_type VARCHAR(20) NOT NULL,
+  owner_id VARCHAR(64) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_token_hash (token_hash),
+  KEY idx_owner (owner_type, owner_id),
+  KEY idx_active_expiry (is_active, expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS whatsapp_clients (

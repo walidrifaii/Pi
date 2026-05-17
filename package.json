@@ -7,7 +7,8 @@
     "start": "node src/server.js",
     "dev": "nodemon --ignore sessions --ignore uploads src/server.js",
     "worker": "node src/workers/messageWorker.js",
-    "diagnose:atlas": "node scripts/checkAtlasConnectivity.js"
+    "diagnose:atlas": "node scripts/checkAtlasConnectivity.js",
+    "migrate": "node scripts/migrate.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

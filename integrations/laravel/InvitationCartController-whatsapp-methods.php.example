@@ -1,0 +1,186 @@
+<?php
+/**
+ * Paste these TWO private methods into App\Http\Controllers\Website\InvitationCartController
+ * (replace your existing sendBookingWhatsappViaNode).
+ *
+ * Requires: app/Services/WhatsAppNodeCampaignService.php (see integrations/laravel/WhatsAppNodeCampaignService.php)
+ */
+
+// use App\Models\BookingInvitaion;  // already imported in your controller
+
+private function resolveNodeInvitationMediaUrl(BookingInvitaion $booking): ?string
+{
+    $booking->loadMissing('template');
+
+    if (! empty($booking->custom_theme_url)) {
+        $url = trim((string) $booking->custom_theme_url);
+        return $url === '' ? null : $url;
+    }
+
+    $template = $booking->template;
+    if (! $template || empty($template->image_path)) {
+        return null;
+    }
+
+    $path = $template->image_path;
+
+    if (function_exists('getImagePathR2')) {
+        $url = getImagePathR2($path);
+        if ($url) {
+            return rtrim((string) $url, '/');
+        }
+    }
+
+    $base = rtrim((string) env('R2_PUBLIC_URL', 'https://pub-7708d9a63bd4488ea45b068466cbd4ce.r2.dev'), '/');
+    $key = ltrim((string) $path, '/');
+    if (preg_match('#^https?://#i', $key)) {
+        return $key;
+    }
+
+    return $base . '/' . $key;
+}
+
+private function sendBookingWhatsappViaNode(
+    $booking,
+    bool $forceResend,
+    int $available
+): array {
+    $sent = 0;
+    $failed = 0;
+    $skipped = 0;
+    $charged = 0;
+    $firstError = '';
+
+    $nodeUrl = rtrim(env('WHATSAPP_NODE_URL', ''), '/');
+    $token = env('WHATSAPP_NODE_TOKEN', '');
+    $clientId = env('WHATSAPP_NODE_CLIENT_ID', '');
+
+    if (! $nodeUrl || ! $token || ! $clientId) {
+        \Log::error('NODE_WA_MISSING_CONFIG');
+
+        return [
+            'sent' => 0, 'failed' => 0, 'skipped' => 0, 'charged' => 0,
+            'firstError' => 'WhatsApp Node.js not configured',
+        ];
+    }
+
+    $contacts = $booking->contacts ?? collect();
+
+    if ($contacts->isEmpty()) {
+        return [
+            'sent' => 0, 'failed' => 0, 'skipped' => 0, 'charged' => 0,
+            'firstError' => 'No contacts found',
+        ];
+    }
+
+    $contactsList = [];
+
+    foreach ($contacts as $contact) {
+        $phone = trim((string) ($contact->phone ?? ''));
+
+        if (! $phone) {
+            $skipped++;
+            continue;
+        }
+
+        $alreadySent = ! empty($contact->wa_node_sent_at);
+
+        if (! $forceResend && $alreadySent) {
+            $skipped++;
+            continue;
+        }
+
+        $this->ensureContactToken($contact);
+
+        $viewUrl = route('booking_invitaion.contact.view', [
+            'id' => $contact->id,
+            'token' => $contact->token,
+        ]);
+
+        $name = $contact->name ?? '';
+        $title = $booking->title ?? '';
+        $datetime = $booking->occasion_datetime ?? '';
+        $location = $booking->location ?? '';
+
+        $message =
+            "مرحباً {$name}،\n".
+            "يسعدنا دعوتك لحضور: {$title}\n".
+            "الموعد: {$datetime}\n".
+            "المكان: {$location}\n\n".
+            "📩 عرض الدعوة:\n{$viewUrl}";
+
+        $contactsList[] = [
+            'contact' => $contact,
+            'phone' => $phone,
+            'name' => $name,
+            'link' => $viewUrl,
+            'message' => $message,
+        ];
+    }
+
+    if ($contactsList === []) {
+        return [
+            'sent' => 0,
+            'failed' => 0,
+            'skipped' => $skipped,
+            'charged' => 0,
+            'firstError' => 'All contacts already sent',
+        ];
+    }
+
+    $campaignName = (string) $booking->id;
+    $messageTemplate =
+        "مرحباً {name}،\n".
+        "يسعدنا دعوتك لحضور: {$booking->title}\n".
+        "الموعد: {$booking->occasion_datetime}\n".
+        "المكان: {$booking->location}\n\n".
+        "📩 عرض الدعوة:\n{link}";
+
+    $csvRows = [];
+    foreach ($contactsList as $item) {
+        $csvRows[] = [
+            'phone' => $item['phone'],
+            'name' => $item['name'],
+            'link' => $item['link'],
+        ];
+    }
+
+    $mediaUrl = $this->resolveNodeInvitationMediaUrl($booking);
+
+    $nodeResult = app(WhatsAppNodeCampaignService::class)->sendCampaign(
+        $campaignName,
+        $messageTemplate,
+        $csvRows,
+        $mediaUrl,
+        $mediaUrl ? 'image' : null
+    );
+
+    if (! ($nodeResult['success'] ?? false)) {
+        return [
+            'sent' => 0,
+            'failed' => 0,
+            'skipped' => $skipped,
+            'charged' => 0,
+            'firstError' => $nodeResult['error'] ?? 'WhatsApp Node campaign failed',
+        ];
+    }
+
+    foreach ($contactsList as $item) {
+        try {
+            $item['contact']->wa_node_sent_at = now();
+            $item['contact']->save();
+        } catch (\Throwable $e) {
+        }
+
+        $sent++;
+        $charged++;
+    }
+
+    return [
+        'sent' => $sent,
+        'failed' => $failed,
+        'skipped' => $skipped,
+        'charged' => $charged,
+        'firstError' => $firstError,
+    ];
+}

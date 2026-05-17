@@ -1,0 +1,18 @@
+<?php
+/**
+ * Use these files (copy into your Laravel app):
+ *
+ * 1) app/Services/WhatsAppNodeCampaignService.php
+ *    → copy from: integrations/laravel/WhatsAppNodeCampaignService.php
+ *
+ * 2) InvitationCartController — replace sendBookingWhatsappViaNode and add resolver:
+ *    → copy from: integrations/laravel/InvitationCartController-whatsapp-methods.php.example
+ *
+ * Add at top of controller:
+ *   use App\Services\WhatsAppNodeCampaignService;
+ *
+ * Node API fills campaigns.media_url when POST /api/campaigns includes mediaUrl (+ optional mediaType).
+ *
+ * If Node returns "Session revoked": use LARAVEL_INTEGRATION_SECRET + WHATSAPP_NODE_USER_ID
+ * (see integrations/laravel/ENV-Laravel-Node.txt and WhatsAppNodeCampaignService.php).
+ */

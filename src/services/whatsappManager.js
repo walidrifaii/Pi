@@ -2,7 +2,6 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 const WhatsAppClientModel = require('../models/WhatsAppClient');
 const MessageLog = require('../models/MessageLog');
 const { emitToClient } = require('../utils/socket');
@@ -22,10 +21,9 @@ const getInitRetryBaseDelayMs = () => Math.max(1000, parseEnvInt('WA_INIT_RETRY_
 const getInitRetryMaxDelayMs = () => Math.max(1000, parseEnvInt('WA_INIT_RETRY_MAX_DELAY_MS', 30000));
 
 const getDefaultSessionsDir = () => {
-  // On cloud hosts, app directory may be ephemeral/restricted.
-  if (process.env.NODE_ENV === 'production') {
-    return path.join(os.tmpdir(), 'wwebjs-sessions');
-  }
+  // Always default to a stable path under the app root so sessions survive redeploys when this
+  // directory is on a persistent volume (Docker/EasyPanel: mount e.g. /app/sessions).
+  // If the app filesystem is read-only, set SESSIONS_DIR to a writable path explicitly.
   return path.resolve(__dirname, '../../sessions');
 };
 
@@ -448,6 +446,7 @@ const sendMessage = async (clientId, phone, message, options = null) => {
  */
 const initWhatsAppManager = async () => {
   try {
+    console.log(`📂 WhatsApp session storage (LocalAuth): ${SESSIONS_DIR}`);
     const connectedClients = await WhatsAppClientModel.find({
       status: 'connected',
       isActive: true
