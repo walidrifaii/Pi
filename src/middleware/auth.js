@@ -5,6 +5,45 @@ const TokenSession = require('../models/TokenSession');
 
 const authMiddleware = async (req, res, next) => {
   try {
+    /**
+     * Laravel / trusted backends: avoid stale WHATSAPP_NODE_TOKEN when the user
+     * logs into the Node app again (auth_token in DB no longer matches the JWT).
+     * Set LARAVEL_INTEGRATION_SECRET on Node + send matching header + X-Integration-User-Id (users.id).
+     */
+    const integrationSecret = (process.env.LARAVEL_INTEGRATION_SECRET || '').trim();
+    const sentSecret = (
+      req.headers['x-laravel-integration-secret'] ||
+      req.headers['x-integration-secret'] ||
+      ''
+    ).toString().trim();
+    const integrationUserId = (
+      req.headers['x-integration-user-id'] ||
+      req.headers['x-node-user-id'] ||
+      ''
+    ).toString().trim();
+
+    if (integrationSecret) {
+      if (sentSecret) {
+        if (sentSecret !== integrationSecret) {
+          return res.status(401).json({ error: 'Invalid integration secret' });
+        }
+        if (!integrationUserId) {
+          return res.status(401).json({ error: 'Missing X-Integration-User-Id header' });
+        }
+        const intUser = await User.findById(integrationUserId);
+        if (!intUser || !intUser.isActive) {
+          return res.status(401).json({ error: 'Integration user not found or inactive' });
+        }
+        delete intUser.password;
+        delete intUser.authToken;
+        intUser.isAdmin = false;
+        req.user = intUser;
+        req.token = null;
+        req.integrationAuth = true;
+        return next();
+      }
+    }
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'No token provided' });

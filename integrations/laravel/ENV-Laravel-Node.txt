@@ -1,0 +1,18 @@
+# Fix "Session revoked. Please login again." from Node when using .env JWT
+# =============================================================================
+# Node stores the latest JWT in users.auth_token. Any new web login revokes old tokens.
+#
+# Option A — Quick (expires again on next login):
+#   Log into the Node web app → copy the new Bearer token → WHATSAPP_NODE_TOKEN in Laravel
+#
+# Option B — Stable (recommended for Laravel):
+#
+# 1) On NODE server .env add (same random string on both sides):
+#    LARAVEL_INTEGRATION_SECRET=generate_a_long_random_string_here
+#
+# 2) In Laravel .env add:
+#    LARAVEL_INTEGRATION_SECRET=generate_a_long_random_string_here
+#    WHATSAPP_NODE_USER_ID=<the Node MySQL users.id that owns the WhatsApp client>
+#
+#    WHATSAPP_NODE_TOKEN can be left empty when using integration auth.
+#    WHATSAPP_NODE_CLIENT_ID stays the WhatsApp client document id as before.
