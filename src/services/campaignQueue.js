@@ -5,7 +5,7 @@ const MessageLog = require('../models/MessageLog');
 const WhatsAppClientModel = require('../models/WhatsAppClient');
 const User = require('../models/User');
 const { query } = require('../db/mysql');
-const { sendMessage } = require('./whatsappManager');
+const { sendMessage, ensureClientReady } = require('./whatsappManager');
 const { renderTemplate, normalizePhone, sleep, randomDelay } = require('../utils/helpers');
 const { emitToClient } = require('../utils/socket');
 const { sendBalanceExhaustedEmail } = require('./balanceNotifier');
@@ -65,6 +65,15 @@ const processCampaign = async (campaignId) => {
   const campaignOwner = await User.findById(dbClient.userId);
 
   console.log(`🚀 Starting campaign ${campaignId} via client ${clientId}`);
+
+  const ready = await ensureClientReady(clientId);
+  if (!ready.ok) {
+    console.error(`Campaign ${campaignId} aborted: ${ready.reason}`);
+    await failPendingContacts(campaignId, ready.reason);
+    emitToClient(clientId, 'campaign-error', { campaignId, message: ready.reason });
+    campaignQueues.delete(campaignId.toString());
+    return;
+  }
 
   // Get all pending contacts in batches
   let hasMore = true;
@@ -213,15 +222,22 @@ const processCampaign = async (campaignId) => {
     }
   }
 
-  // Mark campaign as completed
+  // Mark campaign finished (failed if nothing was sent but there were failures)
   const finalCampaign = await Campaign.findById(campaignId);
   if (finalCampaign && finalCampaign.status === 'running') {
+    const sent = finalCampaign.sentCount || 0;
+    const failed = finalCampaign.failedCount || 0;
+    const allFailed = sent === 0 && failed > 0;
     await Campaign.findByIdAndUpdate(campaignId, {
-      status: 'completed',
+      status: allFailed ? 'failed' : 'completed',
       completedAt: new Date()
     });
-    emitToClient(clientId, 'campaign-completed', { campaignId });
-    console.log(`🎉 Campaign ${campaignId} completed`);
+    emitToClient(clientId, allFailed ? 'campaign-failed' : 'campaign-completed', { campaignId });
+    console.log(
+      allFailed
+        ? `❌ Campaign ${campaignId} failed (0 sent, ${failed} failed)`
+        : `🎉 Campaign ${campaignId} completed`
+    );
   }
 
   campaignQueues.delete(campaignId.toString());

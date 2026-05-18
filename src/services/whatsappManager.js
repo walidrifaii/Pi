@@ -476,6 +476,128 @@ const isClientConnected = (clientId) => {
   return !!wClient;
 };
 
+const isMemoryAndDbConnected = async (clientId) => {
+  if (!activeClients.has(clientId)) return false;
+  const dbClient = await WhatsAppClientModel.findOne({ clientId });
+  return dbClient?.status === 'connected';
+};
+
+/**
+ * Wait until client is in memory and DB status is connected (or fail).
+ */
+const waitForClientReady = (clientId, timeoutMs) => new Promise((resolve) => {
+  const wClient = activeClients.get(clientId);
+  if (!wClient) {
+    resolve({
+      ok: false,
+      reason: 'WhatsApp session is not running on this server. Reconnect from the dashboard.'
+    });
+    return;
+  }
+
+  let settled = false;
+  const finish = (result) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    wClient.removeListener('ready', onReady);
+    wClient.removeListener('auth_failure', onAuthFailure);
+    wClient.removeListener('disconnected', onDisconnected);
+    resolve(result);
+  };
+
+  const onReady = () => {
+    finish({ ok: true, client: activeClients.get(clientId) });
+  };
+
+  const onAuthFailure = () => {
+    finish({
+      ok: false,
+      reason: 'WhatsApp authentication failed. Scan the QR code again.',
+      status: 'auth_failure'
+    });
+  };
+
+  const onDisconnected = () => {
+    finish({
+      ok: false,
+      reason: 'WhatsApp disconnected. Reconnect from the dashboard.',
+      status: 'disconnected'
+    });
+  };
+
+  const timer = setTimeout(async () => {
+    const dbClient = await WhatsAppClientModel.findOne({ clientId });
+    if (dbClient?.status === 'connected' && activeClients.has(clientId)) {
+      finish({ ok: true, client: activeClients.get(clientId) });
+      return;
+    }
+    if (dbClient?.status === 'connected') {
+      await WhatsAppClientModel.findOneAndUpdate(
+        { clientId },
+        { status: 'disconnected', qrCode: null }
+      );
+    }
+    const status = dbClient?.status || 'unknown';
+    const reason =
+      status === 'qr_ready'
+        ? 'WhatsApp needs a QR scan. Open the client and connect before sending.'
+        : 'WhatsApp did not become ready in time. Reconnect from the dashboard.';
+    finish({ ok: false, reason, status });
+  }, timeoutMs);
+
+  isMemoryAndDbConnected(clientId).then((ready) => {
+    if (ready) {
+      finish({ ok: true, client: activeClients.get(clientId) });
+      return;
+    }
+    wClient.once('ready', onReady);
+    wClient.once('auth_failure', onAuthFailure);
+    wClient.once('disconnected', onDisconnected);
+  });
+});
+
+/**
+ * Ensure WhatsApp is loaded in memory and connected (restores session if DB says connected).
+ */
+const ensureClientReady = async (clientId, options = {}) => {
+  const timeoutMs = options.timeoutMs ?? parseEnvInt('WA_ENSURE_READY_MS', 90000);
+
+  const dbClient = await WhatsAppClientModel.findOne({ clientId, isActive: true });
+  if (!dbClient) {
+    return { ok: false, reason: 'WhatsApp client not found' };
+  }
+
+  if (await isMemoryAndDbConnected(clientId)) {
+    return { ok: true, client: activeClients.get(clientId) };
+  }
+
+  const restorable = ['connected', 'initializing', 'qr_ready'].includes(dbClient.status);
+  if (!restorable) {
+    return {
+      ok: false,
+      reason: 'WhatsApp is not connected. Open the client and scan the QR code.',
+      status: dbClient.status
+    };
+  }
+
+  if (!activeClients.has(clientId)) {
+    console.log(`Restoring in-memory WhatsApp session for ${clientId}...`);
+    try {
+      await createWhatsAppClient(clientId);
+    } catch (err) {
+      console.error(`Failed to bootstrap WhatsApp client ${clientId}:`, err);
+      return {
+        ok: false,
+        reason: err.message || 'Failed to start WhatsApp session on the server',
+        status: dbClient.status
+      };
+    }
+  }
+
+  return waitForClientReady(clientId, timeoutMs);
+};
+
 module.exports = {
   createWhatsAppClient,
   getClient,
@@ -483,5 +605,6 @@ module.exports = {
   sendMessage,
   initWhatsAppManager,
   isClientConnected,
+  ensureClientReady,
   activeClients
 };

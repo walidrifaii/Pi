@@ -3,7 +3,7 @@ const router = express.Router();
 const MessageLog = require('../models/MessageLog');
 const WhatsAppClientModel = require('../models/WhatsAppClient');
 const User = require('../models/User');
-const { sendMessage } = require('../services/whatsappManager');
+const { sendMessage, ensureClientReady } = require('../services/whatsappManager');
 const { sendBalanceExhaustedEmail } = require('../services/balanceNotifier');
 const authMiddleware = require('../middleware/auth');
 
@@ -47,6 +47,14 @@ router.post('/send', authMiddleware, async (req, res) => {
     if (!dbClient) return res.status(404).json({ error: 'Client not found' });
     if (dbClient.status !== 'connected') {
       return res.status(400).json({ error: 'WhatsApp client is not connected' });
+    }
+
+    const ready = await ensureClientReady(dbClient.clientId);
+    if (!ready.ok) {
+      return res.status(400).json({
+        error: ready.reason,
+        whatsappStatus: ready.status || dbClient.status
+      });
     }
 
     const sendOpts = mediaUrl && String(mediaUrl).trim() ? { mediaUrl: String(mediaUrl).trim() } : null;
