@@ -1,6 +1,21 @@
 const { query } = require('../db/mysql');
 const { generateObjectId } = require('../utils/objectId');
 
+/** MySQL JSON columns are often returned as objects by mysql2; only parse strings. */
+const parseVariables = (value) => {
+  if (value == null || value === '') return {};
+  if (typeof value === 'object' && !Buffer.isBuffer(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
 const mapRow = (row) => {
   if (!row) return null;
   return {
@@ -9,7 +24,7 @@ const mapRow = (row) => {
     campaignId: row.campaign_id,
     name: row.name,
     phone: row.phone,
-    variables: row.variables ? JSON.parse(row.variables) : {},
+    variables: parseVariables(row.variables),
     status: row.status,
     sentAt: row.sent_at,
     error: row.error,
